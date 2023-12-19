@@ -8,7 +8,7 @@ When you put a text file into your Kindle, you can move the position of the text
 This extension displays the Kindle position of the cursor in the current text file in the bottom right status bar.
 You can also click KLOC in the bottom right status bar to jump to the desired location.
 
-![alt text](./assets/kindle-loc.gif)
+![alt text](https://github.com/katalog/kindle-loc/blob/master/assets/kindle-loc.gif)
 
 ## Requirements
 
