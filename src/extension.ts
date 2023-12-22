@@ -1,5 +1,6 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
+import { off } from 'process';
 import * as vscode from 'vscode';
 
 // This method is called when your extension is activated
@@ -8,7 +9,7 @@ export function activate(context: vscode.ExtensionContext) {
     
     // Use the console to output diagnostic information (console.log) and errors (console.error)
     // This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "kindle-loc" is now active!');
+	//console.log('Congratulations, your extension "kindle-loc" is now active!');
 
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
@@ -22,8 +23,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
-
-let magicNumber = 64.955
 
 class LocationController {
     private disposable: vscode.Disposable;
@@ -51,11 +50,11 @@ class LocationController {
         manager = CursorManager.create()!;
         if (!manager) { return; }
 
-        vscode.window.showInputBox({
-            prompt: `Type an loc number from 0 to ${(manager.maxPosition/magicNumber).toFixed(1)}.`,
-            value: String((manager.cursorOffset/magicNumber).toFixed(1)),
+        vscode.window.showInputBox({            
+            prompt: `Type an loc number from 0 to ${manager.maxKindleLoc.toFixed(1)}.`,
+            value: String(manager.currentCursorKloc.toFixed(1)),
             validateInput: (input: string) => {
-                manager.previewCursorOffset(input);
+                manager.previewCursorMove(input);
                 return undefined;
             }
         }).then((input?: string) => {
@@ -70,14 +69,10 @@ class LocationController {
             return;
         }
 
-        let offset = manager.cursorOffset / magicNumber;
-
-        if (offset !== undefined) {
-            // Update the status bar
-            let positionName = vscode.workspace.getConfiguration('kindle-loc').positionName || 'kloc';
-            this.statusBarItem.text = `${positionName} ${offset.toFixed(1)}`;
-            this.statusBarItem.show();
-        }
+        // Update the status bar
+        let positionName = vscode.workspace.getConfiguration('kindle-loc').positionName || 'kloc';
+        this.statusBarItem.text = `${positionName} ${manager.currentCursorKloc.toFixed(1)}`;
+        this.statusBarItem.show();
     }
 
     private onEvent(): void {
@@ -99,22 +94,14 @@ class CursorManager {
         outlineStyle: 'solid',
         outlineWidth: '1px',
     });
-    // Originally preview was implemented without actually moving the cursor, but that was weird when
-    // the real cursor highlight and the mimicked one were both visible.  Leaving this in just because.
-    // private static CursorLineDecoration = vscode.window.createTextEditorDecorationType({
-    //     backgroundColor: new vscode.ThemeColor('editor.lineHighlightBackground'),
-    //     borderColor: new vscode.ThemeColor('editor.lineHighlightBorder'),
-    //     borderStyle: 'solid',
-    //     borderWidth: '1px',
-    //     isWholeLine: true,
-    // });
+
+    magicNumber = 150
 
     public static create()
     {
         let editor = vscode.window.activeTextEditor;
         let doc = editor ? editor.document : undefined;
         if (!doc) { return undefined; }
-
         return new CursorManager(editor!, doc);
     }
 
@@ -130,12 +117,11 @@ class CursorManager {
     public get cursor() : vscode.Position {
         return this.editor.selection.active;
     }
+
     public get cursorOffset() : number {
-         return this.document.offsetAt(this.cursor);
+        return this.document.offsetAt(this.cursor);
     }
-    // public get selections() : vscode.Selection[] {
-    //     return this.editor.selections;
-    // }
+
     public set selections(selections: vscode.Selection[]) {
         this.editor.selections = selections;
     }
@@ -144,20 +130,54 @@ class CursorManager {
         return this.document.offsetAt(new vscode.Position(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER));
     }
 
-    public previewCursorOffset(offset: string): boolean {
-        let success = false;
-        let newOffset = +offset
-        newOffset = newOffset * magicNumber
+    public get maxBytePosition(): number {
+        return Buffer.byteLength(this.document.getText());
+    }
 
-        let newPosition = this.document.positionAt(newOffset);
+    public get offsetRatio(): number {
+        return this.maxPosition / this.maxBytePosition;
+    }
+
+    public get maxKindleLoc(): number {
+        return this.maxBytePosition / this.magicNumber;
+    }
+
+    public get currentCursorKloc(): number {
+        return Buffer.byteLength(this.document.getText().substr(0, this.cursorOffset)) / this.magicNumber;
+    }
+
+    public previewCursorMove(input: string): boolean {
+        let newKLOC = /^[\d]+$/.test(input) ? Number(input) : -1;
+        if (newKLOC <= 0 || newKLOC > this.maxKindleLoc) {
+            return false;
+        }
+
+        let success = false;
+        let newOffset = (newKLOC / this.maxKindleLoc) * this.maxPosition;
+        this.setNewCursorPosition(newOffset)
+
+        // VS Code offset position does not completely match with byte code position..
+
+        while (true) {
+            let diff = newKLOC - this.currentCursorKloc
+
+            if (diff <= 2.0 && diff >= -2.0) break
+            if (diff > 0) newOffset += 150
+            if (diff < 0) newOffset -= 150
+
+            this.setNewCursorPosition(newOffset)
+        }
+
+        return success;
+    }
+
+    public setNewCursorPosition(newOffset: number) {
+        let newPosition = this.document.positionAt(newOffset);    
         this.cachedSelections[0] = new vscode.Selection(newPosition, newPosition);
         this.editor.selections = this.cachedSelections;    
-        success = true;
-        
         const range = new vscode.Range(this.cursor, this.cursor.translate(0, 1));
         this.editor.setDecorations(CursorManager.cursorPositionDecoration, [range]);
         this.reveal();
-        return success;
     }
 
     public commit() {
